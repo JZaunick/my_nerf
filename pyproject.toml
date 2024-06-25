@@ -1,0 +1,15 @@
+[project]
+name = "my_nerfacto"
+description = "Template repository for creating and registering new methods in nerfstudio."
+version = "0.1.0"
+
+dependencies = [
+    "nerfstudio >= 0.3.0" # you may want to consider pinning the version, ie "nerfstudio==0.1.19"
+    "numpy"
+]
+
+[tool.setuptools.packages.find]
+include = ["my_nerfacto*"]
+
+[project.entry-points.'nerfstudio.method_configs']
+my-nerfacto = 'my_nerfacto.my_config:MyMethod'

@@ -22,13 +22,14 @@ from nerfstudio.engine.schedulers import (
 from nerfstudio.engine.trainer import TrainerConfig
 from nerfstudio.plugins.types import MethodSpecification
 
+
 MyMethod = MethodSpecification(
     config=TrainerConfig(
         method_name="my_nerfacto",  
         steps_per_eval_batch=500,
         steps_per_eval_all_images=500,
         steps_per_save=2000,
-        max_num_iterations=5000,
+        max_num_iterations=2000,
         mixed_precision=True,
         pipeline=TemplatePipelineConfig(
             datamanager=TemplateDataManagerConfig(
@@ -40,7 +41,6 @@ MyMethod = MethodSpecification(
                 eval_num_rays_per_chunk=1 << 15,
                 average_init_density=0.01,
                 eval_cam=True
-
                 
                 
             ),

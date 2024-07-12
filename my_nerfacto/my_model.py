@@ -30,11 +30,12 @@ from nerfstudio.model_components.losses import (
     scale_gradients_by_distance_squared,
 )
 from nerfstudio.model_components.ray_samplers import ProposalNetworkSampler, UniformSampler
-from nerfstudio.model_components.renderers import AccumulationRenderer, DepthRenderer, NormalsRenderer, RGBRenderer
+from nerfstudio.model_components.renderers import AccumulationRenderer, DepthRenderer, NormalsRenderer, RGBRenderer, SemanticRenderer
 from nerfstudio.model_components.scene_colliders import NearFarCollider
 from nerfstudio.model_components.shaders import NormalsShader
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.utils import colormaps
+from nerfstudio.data.dataparsers.base_dataparser import Semantics
 
 @dataclass
 class MyModelConfig(NerfactoModelConfig):
@@ -43,7 +44,8 @@ class MyModelConfig(NerfactoModelConfig):
     Add your custom model config parameters here.
     """
     _target: Type = field(default_factory=lambda: MyNerfactoModel)
-    eval_cam: bool = False
+
+    eval_cam: bool = True
     """Whether to update eval camera poses during training"""
 
 
@@ -52,13 +54,62 @@ class MyNerfactoModel(NerfactoModel):
 
     config: MyModelConfig
 
+    # def __init__(self, config: MyModelConfig, metadata: Dict, **kwargs) -> None:
+    #     #assert "semantics" in metadata.keys() and isinstance(metadata["semantics"], Semantics)
+    #     self.semantics = metadata["semantics"]
+    #     super().__init__(config=config, **kwargs)
+    #     self.colormap = self.semantics.colors.clone().detach().to(self.device)
+
+
     def populate_modules(self):
+        
         
         super().populate_modules()
         if self.config.eval_cam:
+            
             self.eval_cam_cb = 0
             self.use_eval = False
+        if self.config.disable_scene_contraction:
+            scene_contraction = None
+        else:
+            scene_contraction = SceneContraction(order=float("inf"))
 
+        appearance_embedding_dim = self.config.appearance_embed_dim if self.config.use_appearance_embedding else 0
+
+
+           # Fields
+        self.field = NerfactoField(
+            self.scene_box.aabb,
+            hidden_dim=self.config.hidden_dim,
+            num_levels=self.config.num_levels,
+            max_res=self.config.max_res,
+            base_res=self.config.base_res,
+            features_per_level=self.config.features_per_level,
+            log2_hashmap_size=self.config.log2_hashmap_size,
+            hidden_dim_color=self.config.hidden_dim_color,
+            hidden_dim_transient=self.config.hidden_dim_transient,
+            spatial_distortion=scene_contraction,
+            num_images=self.num_train_data,
+            use_pred_normals=self.config.predict_normals,
+            use_average_appearance_embedding=self.config.use_average_appearance_embedding,
+            appearance_embedding_dim=appearance_embedding_dim,
+            average_init_density=self.config.average_init_density,
+            implementation=self.config.implementation,
+            #use_semantics=True,
+            #num_semantic_classes=20
+        )
+
+        self.camera_optimizer: CameraOptimizer = self.config.camera_optimizer.setup(
+            num_cameras=(self.num_train_data), device="cpu"
+        )
+        self.camera_optimizer_eval: CameraOptimizer = self.config.camera_optimizer.setup(
+                        num_cameras=(5), device="cpu"
+                        )
+
+        #self.cached_camera_optimizer = self.camera_optimizer
+
+        #Renderers
+        self.renderer_semantics = SemanticRenderer()
 
     def get_training_callbacks(
             self, training_callback_attributes: TrainingCallbackAttributes
@@ -66,6 +117,15 @@ class MyNerfactoModel(NerfactoModel):
             callbacks = []
 
             if self.config.eval_cam:
+
+                #def init_eval_camopt(step):
+                    # self.num_eval = training_callback_attributes.pipeline.num_eval_data
+                    # print('num_eval in model', self.num_eval, '###########################################')
+                    # self.camera_optimizer_eval: CameraOptimizer = self.config.camera_optimizer.setup(
+                    #    num_cameras=(training_callback_attributes.pipeline.num_eval_data), device="cpu"
+                    #    )
+                    
+
                 def count_evalcam_cb(step):
                     if self.use_eval:
                         self.eval_cam_cb+=1
@@ -80,19 +140,33 @@ class MyNerfactoModel(NerfactoModel):
                     
 
                     if self.use_eval:
-                        
-                        print(self.eval_cam_cb)
+                        self.camera_optimizer = self.camera_optimizer_eval
+                        print(f'{self.camera_optimizer.num_cameras=}')
+                        #print(f'{self.camera_optimizer.pose_adjustment.shape=}')
+                        #print(self.eval_cam_cb)
                         for k, v in self.get_param_groups().items():
                             if k != 'camera_opt':
                                 for p in v:
                                     p.requires_grad = False
                     
-                    else: 
+                    else:
+                        self.camera_optimizer = self.cached_camera_optimizer
+                        print(f'{self.camera_optimizer.num_cameras=}')
+                        #print(f'{self.camera_optimizer.pose_adjustment.shape=}')
                         for k, v in self.get_param_groups().items():
                             if k != 'camera_opt':
                                 for p in v:                                 
                                     p.requires_grad = True
-                            
+                
+                # callbacks.append(
+                #     TrainingCallback(
+                #         where_to_run=[TrainingCallbackLocation.BEFORE_TRAIN_ITERATION],
+                #         iters=[0],
+                #         #update_every_num_iters=1,
+                        
+                #         func=init_eval_camopt,
+                #     )
+                # )            
                     
                 callbacks.append(
                     TrainingCallback(
@@ -150,6 +224,7 @@ class MyNerfactoModel(NerfactoModel):
     def get_outputs(self, ray_bundle: RayBundle):
         # apply the camera optimizer pose tweaks
         #if self.training: #should also be applied during eval(?)
+        
         self.camera_optimizer.apply_to_raybundle(ray_bundle)
         ray_samples: RaySamples
         ray_samples, weights_list, ray_samples_list = self.proposal_sampler(ray_bundle, density_fns=self.density_fns)
@@ -166,13 +241,22 @@ class MyNerfactoModel(NerfactoModel):
             depth = self.renderer_depth(weights=weights, ray_samples=ray_samples)
         expected_depth = self.renderer_expected_depth(weights=weights, ray_samples=ray_samples)
         accumulation = self.renderer_accumulation(weights=weights)
+        #semantic = self.renderer_semantics(semantics=field_outputs[FieldHeadNames.RGB],weights=weights)
+
+        
 
         outputs = {
             "rgb": rgb,
             "accumulation": accumulation,
             "depth": depth,
             "expected_depth": expected_depth,
+            #"semantics": semantic
         }
+
+        # semantics colormaps
+        #outputs['semantic_labels'] = torch.argmax(torch.nn.functional.softmax(outputs["semantics"], dim=-1), dim=-1)
+        #outputs["semantics_colormap"] = self.colormap.to(self.device)[semantic_labels]
+
 
         if self.config.predict_normals:
             normals = self.renderer_normals(normals=field_outputs[FieldHeadNames.NORMALS], weights=weights)
@@ -197,4 +281,6 @@ class MyNerfactoModel(NerfactoModel):
 
         for i in range(self.config.num_proposal_iterations):
             outputs[f"prop_depth_{i}"] = self.renderer_depth(weights=weights_list[i], ray_samples=ray_samples_list[i])
+        
         return outputs
+

@@ -47,6 +47,11 @@ class MyModelConfig(NerfactoModelConfig):
 
     eval_cam: bool = True
     """Whether to update eval camera poses during training"""
+    eval_cam_interval = 100
+    """after how many steps to update eval cam poses"""
+    eval_cam_steps = 10
+    """for how many steps to update cam poses"""
+    
 
 
 class MyNerfactoModel(NerfactoModel):
@@ -65,10 +70,7 @@ class MyNerfactoModel(NerfactoModel):
         
         
         super().populate_modules()
-        if self.config.eval_cam:
-            
-            self.eval_cam_cb = 0
-            self.use_eval = False
+        
         if self.config.disable_scene_contraction:
             scene_contraction = None
         else:
@@ -106,10 +108,10 @@ class MyNerfactoModel(NerfactoModel):
                         num_cameras=(5), device="cpu"
                         )
 
-        #self.cached_camera_optimizer = self.camera_optimizer
+        self.cached_camera_optimizer = self.camera_optimizer
 
         #Renderers
-        self.renderer_semantics = SemanticRenderer()
+        #self.renderer_semantics = SemanticRenderer()
 
     def get_training_callbacks(
             self, training_callback_attributes: TrainingCallbackAttributes
@@ -118,6 +120,7 @@ class MyNerfactoModel(NerfactoModel):
 
             if self.config.eval_cam:
 
+                # funktioniert so nicht (muss in populate modules)
                 #def init_eval_camopt(step):
                     # self.num_eval = training_callback_attributes.pipeline.num_eval_data
                     # print('num_eval in model', self.num_eval, '###########################################')
@@ -126,32 +129,39 @@ class MyNerfactoModel(NerfactoModel):
                     #    )
                     
 
-                def count_evalcam_cb(step):
-                    if self.use_eval:
-                        self.eval_cam_cb+=1
-                    if self.eval_cam_cb%10==0:
-                        self.use_eval = False
 
                     
                 def eval_cam_opt(step):
                     
-                    if step>0 and step%100==0:
-                        self.use_eval=True
+               
                     
 
-                    if self.use_eval:
+                    if step % self.config.eval_cam_interval >= 0 and step % self.config.eval_cam_interval <  self.config.eval_cam_steps and step >= self.config.eval_cam_interval:
+                        training_callback_attributes.pipeline.datamanager.next_train = training_callback_attributes.pipeline.datamanager.next_eval
+                        print('using next eval')
                         self.camera_optimizer = self.camera_optimizer_eval
                         print(f'{self.camera_optimizer.num_cameras=}')
                         #print(f'{self.camera_optimizer.pose_adjustment.shape=}')
-                        #print(self.eval_cam_cb)
+                        
+                        #re-setup optimizers in first step of interval
+                        if step % self.config.eval_cam_interval == 0 and step > 0:
+                            print(f"Condition met at step {step}")
+                            training_callback_attributes.trainer.optimizers= training_callback_attributes.trainer.setup_optimizers()
+                            #TODO: probably, both optimizers need to be kept in cache aswell
                         for k, v in self.get_param_groups().items():
                             if k != 'camera_opt':
                                 for p in v:
                                     p.requires_grad = False
                     
                     else:
+                        training_callback_attributes.pipeline.datamanager.next_train = training_callback_attributes.pipeline.datamanager.next_train_cache
                         self.camera_optimizer = self.cached_camera_optimizer
                         print(f'{self.camera_optimizer.num_cameras=}')
+
+                        #re-setup optimizers after using eval cam poses
+                        if step %self.config.eval_cam_interval==self.config.eval_cam_steps and step >= self.config.eval_cam_interval:
+                            print('first of not', step)
+                            training_callback_attributes.trainer.optimizers=training_callback_attributes.trainer.setup_optimizers()
                         #print(f'{self.camera_optimizer.pose_adjustment.shape=}')
                         for k, v in self.get_param_groups().items():
                             if k != 'camera_opt':
@@ -177,15 +187,6 @@ class MyNerfactoModel(NerfactoModel):
                     )
                 )
 
-                callbacks.append(
-                    TrainingCallback(
-                        where_to_run=[TrainingCallbackLocation.AFTER_TRAIN_ITERATION],
-                        update_every_num_iters=1,
-                        
-                        func=count_evalcam_cb,
-                    )
-                )
-                    
             
             if self.config.use_proposal_weight_anneal:
                 # anneal the weights of the proposal network before doing PDF sampling

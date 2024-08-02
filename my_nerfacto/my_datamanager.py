@@ -108,34 +108,34 @@ class TemplateDataManager(VanillaDataManager):
         
         self.next_train_cache = self.next_train
 
-    def get_training_callbacks(
-        self, training_callback_attributes: TrainingCallbackAttributes
-    ) -> List[TrainingCallback]:
-        callbacks = []
-        if training_callback_attributes.pipeline.model.config.eval_cam:
-            def use_eval_cams(step):
-                if training_callback_attributes.pipeline.model.use_eval:
+    # def get_training_callbacks(
+    #     self, training_callback_attributes: TrainingCallbackAttributes
+    # ) -> List[TrainingCallback]:
+    #     callbacks = []
+    #     if training_callback_attributes.pipeline.model.config.eval_cam:
+    #         def use_eval_cams(step):
+    #             if training_callback_attributes.pipeline.model.use_eval:
 
-                    self.next_train = self.next_eval
-                    print('eval_cam_opt')
-                else:
-                    self.next_train = self.next_train_cache
+    #                 self.next_train = self.next_eval
+    #                 print('eval_cam_opt')
+    #             else:
+    #                 self.next_train = self.next_train_cache
 
             
         
 
-            callbacks.append(
-                        TrainingCallback(
-                            where_to_run=[TrainingCallbackLocation.BEFORE_TRAIN_ITERATION],
-                            update_every_num_iters=1,
+    #         callbacks.append(
+    #                     TrainingCallback(
+    #                         where_to_run=[TrainingCallbackLocation.BEFORE_TRAIN_ITERATION],
+    #                         update_every_num_iters=1,
                             
-                            func=use_eval_cams,
-                        )
-                    )
+    #                         func=use_eval_cams,
+    #                     )
+    #                 )
                      
-        """Returns a list of callbacks to be used during training."""
+    #     """Returns a list of callbacks to be used during training."""
 
-        return callbacks
+    #     return callbacks
     
     def setup_eval(self):
         """Sets up the data loader for evaluation"""
@@ -157,7 +157,7 @@ class TemplateDataManager(VanillaDataManager):
         print(self.eval_image_dataloader.__dir__())
         
         self.iter_eval_image_dataloader = iter(self.eval_image_dataloader)
-        print(vars())
+        
         self.eval_pixel_sampler = self._get_pixel_sampler(self.eval_dataset, self.config.eval_num_rays_per_batch)
         self.eval_ray_generator = RayGenerator(self.eval_dataset.cameras.to(self.device))
         # for loading full images
@@ -175,21 +175,34 @@ class TemplateDataManager(VanillaDataManager):
     def next_train(self, step: int) -> Tuple[RayBundle, Dict]:
         """Returns the next batch of data from the train dataloader."""
         self.train_count += 1
-        #print(self.train_count)
-        image_batch = next(self.iter_train_image_dataloader)
-        #print(f'{image_batch=}')
+        
+        # sample a batch of images
+        image_batch = next(self.iter_train_image_dataloader) #dict mit indices (1d tensor (size n) - nicht sortiert, aber in jedem step gleich) und Bildern (size (n,h,w,d))
+
+        print(f'{image_batch["image_idx"].shape=}')
+        
+        # sample pixels from this batch of images
         assert self.train_pixel_sampler is not None
         assert isinstance(image_batch, dict)
-        batch = self.train_pixel_sampler.sample(image_batch)
+        batch = self.train_pixel_sampler.sample(image_batch) #sample pixels from imgs
+        #print(f'{batch=}')
+        print(f'{batch["image"].shape=}')
         ray_indices = batch["indices"]
+        #print(f'{ray_indices=}, {ray_indices.size()=}')
+
+        # generate rays from this image and pixel indices (?)
         ray_bundle = self.train_ray_generator(ray_indices)
+
+
+        # return RayBundle and RayGT information (?)
         return ray_bundle, batch
     
     def next_eval(self, step: int) -> Tuple[RayBundle, Dict]:
         """Returns the next batch of data from the eval dataloader."""
         self.eval_count += 1
         image_batch = next(self.iter_eval_image_dataloader)
-        print('image batch is', image_batch)
+        print(f'{image_batch["image_idx"].shape=}')
+        #print('image batch is', image_batch)
         #print(f'image batch for eval: {image_batch=}')
         assert self.eval_pixel_sampler is not None
         assert isinstance(image_batch, dict)

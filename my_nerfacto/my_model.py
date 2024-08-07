@@ -3,6 +3,7 @@ Template Model File
 
 Currently this subclasses the Nerfacto model. Consider subclassing from the base Model.
 """
+import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Tuple, Type
 
@@ -11,6 +12,7 @@ from nerfstudio.models.nerfacto import NerfactoModel, NerfactoModelConfig  # for
 from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes, TrainingCallbackLocation
 #from nerfstudio.models.base_model import Model, ModelConfig  # for custom Model
 import numpy as np
+import math
 import torch
 from torch.nn import Parameter
 
@@ -101,11 +103,17 @@ class MyNerfactoModel(NerfactoModel):
             #num_semantic_classes=20
         )
 
+        #get number of eval data
+        print(self.num_train_data)
+        self.num_eval_data = math.floor((self.num_train_data/0.9-self.num_train_data)) #TODO: train fraction should not be hardcoded
+        print('number of eval data:', self.num_eval_data)
+        
         self.camera_optimizer: CameraOptimizer = self.config.camera_optimizer.setup(
             num_cameras=(self.num_train_data), device="cpu"
         )
+        
         self.camera_optimizer_eval: CameraOptimizer = self.config.camera_optimizer.setup(
-                        num_cameras=(5), device="cpu"
+                        num_cameras=(self.num_eval_data), device="cpu"
                         )
 
         self.cached_camera_optimizer = self.camera_optimizer

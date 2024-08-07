@@ -99,11 +99,11 @@ class TemplatePipeline(VanillaPipeline):
         """
         self.eval()
         camera, batch = self.datamanager.next_eval_image(step)
-        print(camera)
+        #print(camera)
         
         print(type(camera), camera.shape)
         print(camera.camera_to_worlds, camera.camera_to_worlds.shape)
-        self.model.camera_optimizer.apply_to_camera(camera)
+        self.model.camera_optimizer_eval.apply_to_camera(camera)
         print(camera.camera_to_worlds, camera.camera_to_worlds.shape)
         
         outputs = self.model.get_outputs_for_camera(camera)
@@ -125,7 +125,7 @@ class TemplatePipeline(VanillaPipeline):
         """
         self.eval()
         ray_bundle, batch = self.datamanager.next_eval(step)
-        self.model.camera_optimizer.apply_to_raybundle(ray_bundle)
+        self.model.camera_optimizer_eval.apply_to_raybundle(ray_bundle)
         model_outputs = self.model(ray_bundle)
         metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
@@ -173,7 +173,7 @@ class TemplatePipeline(VanillaPipeline):
                 # time this the following line
                 inner_start = time()
                 print('camera', idx, 'before', camera.camera_to_worlds)
-                self.model.camera_optimizer.apply_to_camera(camera)
+                self.model.camera_optimizer_eval.apply_to_camera(camera)
                 print('camera', idx, 'after', camera.camera_to_worlds)
                 outputs = self.model.get_outputs_for_camera(camera=camera)
                 height, width = camera.height, camera.width

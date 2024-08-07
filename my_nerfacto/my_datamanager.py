@@ -140,8 +140,8 @@ class TemplateDataManager(VanillaDataManager):
     def setup_eval(self):
         """Sets up the data loader for evaluation"""
         assert self.eval_dataset is not None
-        print(self.eval_dataset.__dir__())
-        print(self.eval_dataset.cameras)
+        #print(self.eval_dataset.__dir__())
+        #print(self.eval_dataset.cameras)
         
         CONSOLE.print("Setting up evaluation dataset...")
         self.eval_image_dataloader = CacheDataloader(
@@ -154,7 +154,7 @@ class TemplateDataManager(VanillaDataManager):
             collate_fn=self.config.collate_fn,
             exclude_batch_keys_from_device=self.exclude_batch_keys_from_device,
         )
-        print(self.eval_image_dataloader.__dir__())
+        #print(self.eval_image_dataloader.__dir__())
         
         self.iter_eval_image_dataloader = iter(self.eval_image_dataloader)
         
@@ -179,14 +179,14 @@ class TemplateDataManager(VanillaDataManager):
         # sample a batch of images
         image_batch = next(self.iter_train_image_dataloader) #dict mit indices (1d tensor (size n) - nicht sortiert, aber in jedem step gleich) und Bildern (size (n,h,w,d))
 
-        print(f'{image_batch["image_idx"].shape=}')
+        #print(f'{image_batch["image_idx"].shape=}')
         
         # sample pixels from this batch of images
         assert self.train_pixel_sampler is not None
         assert isinstance(image_batch, dict)
         batch = self.train_pixel_sampler.sample(image_batch) #sample pixels from imgs
         #print(f'{batch=}')
-        print(f'{batch["image"].shape=}')
+        #print(f'{batch["image"].shape=}')
         ray_indices = batch["indices"]
         #print(f'{ray_indices=}, {ray_indices.size()=}')
 
@@ -201,7 +201,7 @@ class TemplateDataManager(VanillaDataManager):
         """Returns the next batch of data from the eval dataloader."""
         self.eval_count += 1
         image_batch = next(self.iter_eval_image_dataloader)
-        print(f'{image_batch["image_idx"].shape=}')
+        #print(f'{image_batch["image_idx"].shape=}')
         #print('image batch is', image_batch)
         #print(f'image batch for eval: {image_batch=}')
         assert self.eval_pixel_sampler is not None

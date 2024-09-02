@@ -3,7 +3,7 @@ Template Model File
 
 Currently this subclasses the Nerfacto model. Consider subclassing from the base Model.
 """
-import sys
+#import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Tuple, Type
 
@@ -61,11 +61,7 @@ class MyNerfactoModel(NerfactoModel):
 
     config: MyModelConfig
 
-    # def __init__(self, config: MyModelConfig, metadata: Dict, **kwargs) -> None:
-    #     #assert "semantics" in metadata.keys() and isinstance(metadata["semantics"], Semantics)
-    #     self.semantics = metadata["semantics"]
-    #     super().__init__(config=config, **kwargs)
-    #     self.colormap = self.semantics.colors.clone().detach().to(self.device)
+
 
 
     def populate_modules(self):
@@ -99,8 +95,6 @@ class MyNerfactoModel(NerfactoModel):
             appearance_embedding_dim=appearance_embedding_dim,
             average_init_density=self.config.average_init_density,
             implementation=self.config.implementation,
-            #use_semantics=True,
-            #num_semantic_classes=20
         )
 
         #get number of eval data
@@ -143,33 +137,47 @@ class MyNerfactoModel(NerfactoModel):
                     
                
                     
-
+                    #switch to eval-pose.optimization:
                     if step % self.config.eval_cam_interval >= 0 and step % self.config.eval_cam_interval <  self.config.eval_cam_steps and step >= self.config.eval_cam_interval:
+                        #use eval set
                         training_callback_attributes.pipeline.datamanager.next_train = training_callback_attributes.pipeline.datamanager.next_eval
-                        print('using next eval')
-                        self.camera_optimizer = self.camera_optimizer_eval
+                        
+                        
                         print(f'{self.camera_optimizer.num_cameras=}')
                         #print(f'{self.camera_optimizer.pose_adjustment.shape=}')
                         
                         #re-setup optimizers in first step of interval
                         if step % self.config.eval_cam_interval == 0 and step > 0:
                             print(f"Condition met at step {step}")
+                            self.cached_camera_optimizer = self.camera_optimizer
+                            self.camera_optimizer = self.camera_optimizer_eval
+                            print(f'{self.camera_optimizer.num_cameras=}')
+                            self.cached_train_optimizers = training_callback_attributes.trainer.optimizers
                             training_callback_attributes.trainer.optimizers= training_callback_attributes.trainer.setup_optimizers()
-                            #TODO: probably, both optimizers need to be kept in cache aswell
+                            
                         for k, v in self.get_param_groups().items():
                             if k != 'camera_opt':
                                 for p in v:
                                     p.requires_grad = False
                     
+                    # if step==0:
+                    #     print('###############first step###########')
+                    #     training_callback_attributes.trainer.optimizers= training_callback_attributes.trainer.setup_optimizers()
+                    #     self.cached_optimizers = training_callback_attributes.trainer.optimizers
+                    
+                    
                     else:
                         training_callback_attributes.pipeline.datamanager.next_train = training_callback_attributes.pipeline.datamanager.next_train_cache
-                        self.camera_optimizer = self.cached_camera_optimizer
+                        #self.camera_optimizer = self.cached_camera_optimizer
                         print(f'{self.camera_optimizer.num_cameras=}')
 
                         #re-setup optimizers after using eval cam poses
                         if step %self.config.eval_cam_interval==self.config.eval_cam_steps and step >= self.config.eval_cam_interval:
                             print('first of not', step)
-                            training_callback_attributes.trainer.optimizers=training_callback_attributes.trainer.setup_optimizers()
+                            self.camera_optimizer_eval = self.camera_optimizer
+                            self.camera_optimizer = self.cached_camera_optimizer
+                            training_callback_attributes.trainer.optimizers=self.cached_train_optimizers
+                            
                         #print(f'{self.camera_optimizer.pose_adjustment.shape=}')
                         for k, v in self.get_param_groups().items():
                             if k != 'camera_opt':

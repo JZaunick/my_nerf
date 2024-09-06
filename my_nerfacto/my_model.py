@@ -3,7 +3,7 @@ Template Model File
 
 Currently this subclasses the Nerfacto model. Consider subclassing from the base Model.
 """
-#import sys
+
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Tuple, Type
 
@@ -37,7 +37,7 @@ from nerfstudio.model_components.scene_colliders import NearFarCollider
 from nerfstudio.model_components.shaders import NormalsShader
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.utils import colormaps
-from nerfstudio.data.dataparsers.base_dataparser import Semantics
+
 
 @dataclass
 class MyModelConfig(NerfactoModelConfig):
@@ -98,22 +98,22 @@ class MyNerfactoModel(NerfactoModel):
         )
 
         #get number of eval data
-        print(self.num_train_data)
         self.num_eval_data = math.floor((self.num_train_data/0.9-self.num_train_data)) #TODO: train fraction should not be hardcoded
         print('number of eval data:', self.num_eval_data)
         
-        self.camera_optimizer: CameraOptimizer = self.config.camera_optimizer.setup(
+        #cam optimizers for train and eval dataset 
+        self.camera_optimizer_train: CameraOptimizer = self.config.camera_optimizer.setup(
             num_cameras=(self.num_train_data), device="cpu"
         )
         
         self.camera_optimizer_eval: CameraOptimizer = self.config.camera_optimizer.setup(
                         num_cameras=(self.num_eval_data), device="cpu"
                         )
+        
 
-        self.cached_camera_optimizer = self.camera_optimizer
+        self.camera_optimizer = self.camera_optimizer_train
 
-        #Renderers
-        #self.renderer_semantics = SemanticRenderer()
+        
 
     def get_training_callbacks(
             self, training_callback_attributes: TrainingCallbackAttributes
@@ -122,36 +122,22 @@ class MyNerfactoModel(NerfactoModel):
 
             if self.config.eval_cam:
 
-                # funktioniert so nicht (muss in populate modules)
-                #def init_eval_camopt(step):
-                    # self.num_eval = training_callback_attributes.pipeline.num_eval_data
-                    # print('num_eval in model', self.num_eval, '###########################################')
-                    # self.camera_optimizer_eval: CameraOptimizer = self.config.camera_optimizer.setup(
-                    #    num_cameras=(training_callback_attributes.pipeline.num_eval_data), device="cpu"
-                    #    )
-                    
-
-
-                    
+                                   
                 def eval_cam_opt(step):
                     
                
                     
                     #switch to eval-pose.optimization:
-                    if step % self.config.eval_cam_interval >= 0 and step % self.config.eval_cam_interval <  self.config.eval_cam_steps and step >= self.config.eval_cam_interval:
+                    if step % self.config.eval_cam_interval <  self.config.eval_cam_steps and step >= self.config.eval_cam_interval:
                         #use eval set
                         training_callback_attributes.pipeline.datamanager.next_train = training_callback_attributes.pipeline.datamanager.next_eval
-                        
-                        
-                        print(f'{self.camera_optimizer.num_cameras=}')
-                        #print(f'{self.camera_optimizer.pose_adjustment.shape=}')
-                        
+                                               
                         #re-setup optimizers in first step of interval
                         if step % self.config.eval_cam_interval == 0 and step > 0:
-                            print(f"Condition met at step {step}")
-                            self.cached_camera_optimizer = self.camera_optimizer
+                            #print(f"Condition met at step {step}")
+                            
                             self.camera_optimizer = self.camera_optimizer_eval
-                            print(f'{self.camera_optimizer.num_cameras=}')
+                            #cache train optimizers and re-setup for eval dataset:
                             self.cached_train_optimizers = training_callback_attributes.trainer.optimizers
                             training_callback_attributes.trainer.optimizers= training_callback_attributes.trainer.setup_optimizers()
                             
@@ -160,39 +146,25 @@ class MyNerfactoModel(NerfactoModel):
                                 for p in v:
                                     p.requires_grad = False
                     
-                    # if step==0:
-                    #     print('###############first step###########')
-                    #     training_callback_attributes.trainer.optimizers= training_callback_attributes.trainer.setup_optimizers()
-                    #     self.cached_optimizers = training_callback_attributes.trainer.optimizers
+                   
                     
                     
                     else:
                         training_callback_attributes.pipeline.datamanager.next_train = training_callback_attributes.pipeline.datamanager.next_train_cache
-                        #self.camera_optimizer = self.cached_camera_optimizer
-                        print(f'{self.camera_optimizer.num_cameras=}')
+                        
 
-                        #re-setup optimizers after using eval cam poses
-                        if step %self.config.eval_cam_interval==self.config.eval_cam_steps and step >= self.config.eval_cam_interval:
-                            print('first of not', step)
-                            self.camera_optimizer_eval = self.camera_optimizer
-                            self.camera_optimizer = self.cached_camera_optimizer
+                        #switch back to train dataset optimizers after using eval cam poses
+                        if step %self.config.eval_cam_interval==self.config.eval_cam_steps and step >= self.config.eval_cam_interval:                       
+                            self.camera_optimizer = self.camera_optimizer_train
                             training_callback_attributes.trainer.optimizers=self.cached_train_optimizers
                             
-                        #print(f'{self.camera_optimizer.pose_adjustment.shape=}')
+                        
                         for k, v in self.get_param_groups().items():
                             if k != 'camera_opt':
                                 for p in v:                                 
                                     p.requires_grad = True
                 
-                # callbacks.append(
-                #     TrainingCallback(
-                #         where_to_run=[TrainingCallbackLocation.BEFORE_TRAIN_ITERATION],
-                #         iters=[0],
-                #         #update_every_num_iters=1,
-                        
-                #         func=init_eval_camopt,
-                #     )
-                # )            
+              
                     
                 callbacks.append(
                     TrainingCallback(
@@ -240,9 +212,8 @@ class MyNerfactoModel(NerfactoModel):
     
     def get_outputs(self, ray_bundle: RayBundle):
         # apply the camera optimizer pose tweaks
-        #if self.training: #should also be applied during eval(?)
-        
-        self.camera_optimizer.apply_to_raybundle(ray_bundle)
+        if self.training: 
+            self.camera_optimizer.apply_to_raybundle(ray_bundle)
         ray_samples: RaySamples
         ray_samples, weights_list, ray_samples_list = self.proposal_sampler(ray_bundle, density_fns=self.density_fns)
         field_outputs = self.field.forward(ray_samples, compute_normals=self.config.predict_normals)

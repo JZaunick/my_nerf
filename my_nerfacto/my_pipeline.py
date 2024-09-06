@@ -3,6 +3,7 @@ Nerfstudio Template Pipeline
 """
 from __future__ import annotations
 
+import copy
 import typing
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Type
@@ -99,18 +100,22 @@ class TemplatePipeline(VanillaPipeline):
         """
         self.eval()
         camera, batch = self.datamanager.next_eval_image(step)
-        #print(camera)
         
-        print(type(camera), camera.shape)
-        print(camera.camera_to_worlds, camera.camera_to_worlds.shape)
-        self.model.camera_optimizer_eval.apply_to_camera(camera)
-        print(camera.camera_to_worlds, camera.camera_to_worlds.shape)
         
-        outputs = self.model.get_outputs_for_camera(camera)
+        
+        camera_opt = copy.deepcopy(camera)
+        
+        # print(camera_opt.camera_to_worlds, camera_opt.camera_to_worlds.shape)
+        camera_opt.camera_to_worlds = self.model.camera_optimizer_eval.apply_to_camera(camera_opt)
+        # print(camera_opt.camera_to_worlds, camera_opt.camera_to_worlds.shape)
+
+        
+        
+        outputs = self.model.get_outputs_for_camera(camera_opt)
 
         metrics_dict, images_dict = self.model.get_image_metrics_and_images(outputs, batch)
         assert "num_rays" not in metrics_dict
-        metrics_dict["num_rays"] = (camera.height * camera.width * camera.size).item()
+        metrics_dict["num_rays"] = (camera_opt.height * camera_opt.width * camera_opt.size).item()
         self.train()
         
         return metrics_dict, images_dict
@@ -170,13 +175,18 @@ class TemplatePipeline(VanillaPipeline):
             task = progress.add_task("[green]Evaluating all images...using opt poses", total=num_images)
             idx = 0
             for camera, batch in data_loader:
+                camera_opt = copy.deepcopy(camera)
                 # time this the following line
                 inner_start = time()
-                print('camera', idx, 'before', camera.camera_to_worlds)
-                self.model.camera_optimizer_eval.apply_to_camera(camera)
-                print('camera', idx, 'after', camera.camera_to_worlds)
-                outputs = self.model.get_outputs_for_camera(camera=camera)
-                height, width = camera.height, camera.width
+                
+                #print(self.model.camera_optimizer_eval([camera.metadata["cam_idx"]]))
+                
+                # apply pose corrections to camera:
+                #print('camera', idx, 'before', camera_opt.camera_to_worlds)
+                camera_opt.camera_to_worlds = self.model.camera_optimizer_eval.apply_to_camera(camera_opt)
+                #print('camera', idx, 'after', camera_opt.camera_to_worlds)
+                outputs = self.model.get_outputs_for_camera(camera=camera_opt)
+                height, width = camera_opt.height, camera_opt.width
                 num_rays = height * width
                 metrics_dict, image_dict = self.model.get_image_metrics_and_images(outputs, batch)
                 if output_path is not None:
